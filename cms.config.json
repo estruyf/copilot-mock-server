@@ -1,0 +1,13 @@
+{
+  "port": 3000,
+  "responsesPath": "./cms.mock.json",
+  "defaultResponse": "I am running in mocked mode.",
+  "tokenDelayMs": 25,
+  "chunkBy": "word",
+  "logFile": "./copilot-capture.log",
+  "enableConsoleLogs": true,
+  "logRequestBodies": false,
+  "forwardUnmatched": false,
+  "fallbackBaseUrl": "https://api.githubcopilot.com",
+  "fallbackAltBaseUrl": "https://api.individual.githubcopilot.com"
+}

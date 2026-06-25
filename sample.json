@@ -1,0 +1,87 @@
+[
+  {
+    "input": ["kubernetes", "yaml"],
+    "title": "Kubernetes YAML Template",
+    "output": "Here is a Kubernetes YAML template..."
+  },
+  {
+    "input": ["Let me check if this is working with Demo Time"],
+    "output": "Yes, it seems to be working with Demo Time."
+  },
+  {
+    "input": ["joke"],
+    "title": "Developer Joke",
+    "output": "Why did the developer go broke? Because he used up all his cache."
+  },
+  {
+    "input": ["Can you create me a `test.json` file with some dummy content?"],
+    "output": {
+      "text": "Created [[file:test.json]] with your content in JSON format.",
+      "tags": [
+        {
+          "type": "file",
+          "path": "test.json",
+          "label": "test.json"
+        }
+      ]
+    }
+  },
+  {
+    "input": ["list"],
+    "output": "# Demo checklist\n\n- Confirm override settings\n- Start proxy\n- Send prompt in chat\n- Validate streamed reply"
+  },
+  {
+    "input": ["table"],
+    "output": "| Feature | Status |\n|---|---|\n| WebSocket mock | OK |\n| SSE mock | OK |\n| File link tags | OK |"
+  },
+  {
+    "input": ["code"],
+    "output": "Here is a TypeScript snippet:\n\n```ts\nconst message = 'Hello from the mock server';\nconsole.log(message);\n```"
+  },
+  {
+    "input": ["callout"],
+    "output": "> This response is mocked and deterministic for your demo recording."
+  },
+  {
+    "input": ["quote"],
+    "output": "> This is a quoted markdown block from the mock server."
+  },
+  {
+    "input": ["command"],
+    "output": "Try a command URI link: [Open Command Palette](command:workbench.action.showCommands)"
+  },
+  {
+    "input": ["link", "workspace"],
+    "output": {
+      "text": "Created two files for your demo: [[file:test.json|Open test.json]] and [[file:README.md|Open README.md]].",
+      "tags": [
+        {
+          "type": "file",
+          "path": "test.json",
+          "label": "test.json"
+        },
+        {
+          "type": "file",
+          "path": "README.md",
+          "label": "README.md"
+        }
+      ]
+    }
+  },
+  {
+    "input": ["vscode", "setting"],
+    "output": "The following JSON pattern is used by the VS Code assistant flow for settings:\n\n```json\n[{\n  \"type\": \"setting\",\n  \"details\": {\n    \"key\": \"editor.fontSize\",\n    \"value\": 16\n  }\n}]\n```"
+  },
+  {
+    "input": ["vscode", "command"],
+    "output": "The following JSON pattern is used by the VS Code assistant flow for commands:\n\n```json\n[{\n  \"type\": \"command\",\n  \"details\": {\n    \"key\": \"workbench.action.quickOpen\",\n    \"value\": \">Extensions: Install Extensions\"\n  }\n}]\n```"
+  },
+  {
+    "input": ["mixed", "formatting"],
+    "output": "### Mixed output demo\n\n1. Plain text\n2. `inline code`\n3. [Web link](https://code.visualstudio.com/docs/copilot/overview)\n4. [[file:sample.json|Open sample config]]"
+  },
+  {
+    "input": ["emoji"],
+    "output": "Mock completed successfully. Ready for Demo Time."
+  }
+]

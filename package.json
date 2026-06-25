@@ -1,0 +1,31 @@
+{
+  "name": "copilot-mock-server",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Fake GitHub Copilot Chat backend (WebSocket + SSE) for deterministic demos",
+  "bin": {
+    "copilot-mock-server": "./dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "cms.mock.json"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json && chmod +x dist/cli.js",
+    "dev": "tsx src/server.ts",
+    "start": "npm run build && node dist/cli.js",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.10",
+    "@types/ws": "^8.18.1",
+    "tsx": "^4.20.3",
+    "typescript": "^5.8.3"
+  }
+}
