@@ -36,6 +36,10 @@
     "url": "https://github.com/estruyf/copilot-mock-server/issues"
   },
   "homepage": "https://github.com/estruyf/copilot-mock-server#readme",
+  "funding": {
+    "type": "github",
+    "url": "https://github.com/sponsors/estruyf"
+  },
   "engines": {
     "node": ">=22"
   },
