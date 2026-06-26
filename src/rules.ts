@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { CONFIG } from "./config.js";
 import { log } from "./logger.js";
-import type { NormalizedRule, OutputTag, PromptRule } from "./types.js";
+import type { NormalizedRule, NormalizedStep, OutputTag, PromptRule, ToolCall } from "./types.js";
 
 export function normalizeRules(source: PromptRule[]): NormalizedRule[] {
   const normalized: NormalizedRule[] = [];
@@ -19,8 +19,40 @@ export function normalizeRules(source: PromptRule[]): NormalizedRule[] {
         ? rule.title.trim()
         : undefined;
 
+    const outcome =
+      typeof rule.outcome === "string" && rule.outcome.trim()
+        ? rule.outcome.trim()
+        : undefined;
+
+    const normalizeToolCalls = (raw: unknown): ToolCall[] =>
+      Array.isArray(raw)
+        ? (raw as ToolCall[]).filter(
+            (tc) => tc && typeof tc.name === "string" && tc.name.trim(),
+          )
+        : [];
+
+    const ruleDelayMs = typeof rule.delayMs === "number" && rule.delayMs > 0 ? rule.delayMs : 0;
+
+    // Multi-step rules override output + toolCalls
+    if (Array.isArray(rule.steps) && rule.steps.length > 0) {
+      const steps: NormalizedStep[] = rule.steps
+        .map((s) => ({
+          text: typeof s?.text === "string" ? s.text : "",
+          toolCalls: normalizeToolCalls(s?.toolCalls),
+          delayMs: typeof s?.delayMs === "number" && s.delayMs > 0 ? s.delayMs : 0,
+        }))
+        .filter((s) => s.text || s.toolCalls.length > 0);
+
+      if (steps.length > 0) {
+        normalized.push({ input, title, outcome, text: "", tags: [], toolCalls: [], steps, delayMs: ruleDelayMs });
+        continue;
+      }
+    }
+
+    const toolCalls = normalizeToolCalls(rule.toolCalls);
+
     if (typeof rule.output === "string") {
-      normalized.push({ input, title, text: rule.output, tags: [] });
+      normalized.push({ input, title, outcome, text: rule.output, tags: [], toolCalls, steps: [], delayMs: ruleDelayMs });
       continue;
     }
 
@@ -40,7 +72,7 @@ export function normalizeRules(source: PromptRule[]): NormalizedRule[] {
           }))
       : [];
 
-    normalized.push({ input, title, text, tags });
+    normalized.push({ input, title, outcome, text, tags, toolCalls, steps: [], delayMs: ruleDelayMs });
   }
 
   return normalized;

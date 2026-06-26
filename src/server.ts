@@ -11,7 +11,10 @@ import {
   isMockablePostPath,
   isInternalUtilityPrompt,
   isInternalUtilityBody,
+  isSummarizationUtilityBody,
+  isToolResultRequest,
   parseIncomingPathname,
+  parseRequestModel,
 } from "./request.js";
 import { loadPromptRules, findRule, renderOutputText } from "./rules.js";
 import {
@@ -23,12 +26,15 @@ import {
   streamOverChatCompletionsSSE,
   streamOverAnthropicMessagesSSE,
 } from "./streaming.js";
-import { proxyHttpToUpstream, connectWsFallback } from "./proxy.js";
+import { proxyHttpToUpstream, proxyHttpToUpstreamTee, connectWsFallback } from "./proxy.js";
+import { recordInteraction, recordInteractionFromWsFrames, type ApiPathType } from "./learner.js";
 
 export function startServer(configPath: string, overrides?: Partial<import("./types.js").Config>) {
   initConfig(configPath);
   if (overrides) Object.assign(CONFIG, overrides);
   initCerts();
+
+  let lastMatchedRule: import("./types.js").NormalizedRule | null = null;
 
   const server = http.createServer((req, res) => {
     let body = "";
@@ -65,13 +71,25 @@ export function startServer(configPath: string, overrides?: Partial<import("./ty
       const matched = findRule(prompt, rules);
 
       // New chats trigger internal utility requests on /chat/completions
-      // (title/progress generation). If the matched rule has a `title` field,
-      // return that as the response so VS Code shows it as the chat title.
-      // If nothing matches, fall back to upstream for a real title.
+      // (title/progress/summarization). Use `outcome` for summarization if
+      // defined on the last matched rule, `title` for title generation, or
+      // fall back to upstream so Copilot can generate real metadata.
       if (
         isChatCompletionsPath &&
         (isInternalUtilityPrompt(prompt) || isInternalUtilityBody(body))
       ) {
+        if (isSummarizationUtilityBody(body) && lastMatchedRule?.outcome) {
+          res.writeHead(200, {
+            "Content-Type": "text/event-stream",
+            Connection: "keep-alive",
+            "Cache-Control": "no-cache",
+          });
+          await streamOverChatCompletionsSSE(
+            res,
+            buildChatCompletionsChunks(lastMatchedRule.outcome),
+          );
+          return;
+        }
         if (matched?.title) {
           res.writeHead(200, {
             "Content-Type": "text/event-stream",
@@ -88,6 +106,42 @@ export function startServer(configPath: string, overrides?: Partial<import("./ty
         return;
       }
 
+      // Tool-result follow-ups (VS Code sends these after executing a function call).
+      // Return a silent empty completion so the defaultResponse doesn't bleed in.
+      if (isToolResultRequest(body)) {
+        log("HTTP tool-result follow-up; returning empty completion");
+        const toolResultModel = parseRequestModel(body) ?? undefined;
+        res.writeHead(200, {
+          "Content-Type": "text/event-stream",
+          Connection: "keep-alive",
+          "Cache-Control": "no-cache",
+        });
+        if (isChatCompletionsPath) {
+          await streamOverChatCompletionsSSE(res, buildChatCompletionsChunks("", toolResultModel));
+        } else if (isAnthropicMessagesPath) {
+          await streamOverAnthropicMessagesSSE(res, buildAnthropicMessagesEvents("", toolResultModel));
+        } else {
+          await streamOverSSE(res, buildFrames("", toolResultModel));
+        }
+        return;
+      }
+
+      if (matched) lastMatchedRule = matched;
+
+      if (CONFIG.learningMode) {
+        const isUtility = isInternalUtilityPrompt(prompt) || isInternalUtilityBody(body);
+        const pathType: ApiPathType = isChatCompletionsPath
+          ? "chat"
+          : isAnthropicMessagesPath
+            ? "anthropic"
+            : "responses";
+        const sseBody = await proxyHttpToUpstreamTee(req, res, body);
+        if (sseBody && prompt && !isUtility) {
+          recordInteraction(prompt, sseBody, pathType);
+        }
+        return;
+      }
+
       if (!matched && CONFIG.forwardUnmatched) {
         log(
           "HTTP unmatched prompt; forwarding to upstream because forwardUnmatched=true",
@@ -99,6 +153,11 @@ export function startServer(configPath: string, overrides?: Partial<import("./ty
       const responseText = matched
         ? renderOutputText(matched.text, matched.tags)
         : CONFIG.defaultResponse;
+      const toolCalls = matched?.toolCalls ?? [];
+      const steps = matched?.steps ?? [];
+      const delayMs = matched?.delayMs ?? 0;
+
+      const requestedModel = parseRequestModel(body) ?? undefined;
 
       res.writeHead(200, {
         "Content-Type": "text/event-stream",
@@ -109,7 +168,7 @@ export function startServer(configPath: string, overrides?: Partial<import("./ty
       if (isChatCompletionsPath) {
         await streamOverChatCompletionsSSE(
           res,
-          buildChatCompletionsChunks(responseText),
+          buildChatCompletionsChunks(responseText, requestedModel),
         );
         return;
       }
@@ -117,12 +176,12 @@ export function startServer(configPath: string, overrides?: Partial<import("./ty
       if (isAnthropicMessagesPath) {
         await streamOverAnthropicMessagesSSE(
           res,
-          buildAnthropicMessagesEvents(responseText),
+          buildAnthropicMessagesEvents(responseText, requestedModel),
         );
         return;
       }
 
-      await streamOverSSE(res, buildFrames(responseText));
+      await streamOverSSE(res, buildFrames(responseText, requestedModel, toolCalls, steps, delayMs));
     });
   });
 
@@ -133,6 +192,9 @@ export function startServer(configPath: string, overrides?: Partial<import("./ty
 
     let upstreamWs: WebSocket | null = null;
     let upstreamConnecting: Promise<WebSocket> | null = null;
+
+    let wsLearnPendingPrompt = "";
+    const wsLearnFrames: string[] = [];
 
     const ensureUpstream = async () => {
       if (upstreamWs && upstreamWs.readyState === upstreamWs.OPEN)
@@ -145,6 +207,21 @@ export function startServer(configPath: string, overrides?: Partial<import("./ty
 
           upstreamWs.on("message", (payload, isBinary) => {
             if (ws.readyState === ws.OPEN) ws.send(payload, { binary: isBinary });
+
+            if (CONFIG.learningMode && wsLearnPendingPrompt) {
+              const frameStr = payload.toString();
+              wsLearnFrames.push(frameStr);
+              try {
+                const obj = JSON.parse(frameStr) as Record<string, unknown>;
+                if (obj.type === "response.completed") {
+                  const capturedPrompt = wsLearnPendingPrompt;
+                  const capturedFrames = [...wsLearnFrames];
+                  wsLearnPendingPrompt = "";
+                  wsLearnFrames.length = 0;
+                  recordInteractionFromWsFrames(capturedPrompt, capturedFrames);
+                }
+              } catch { /* non-JSON WS frame */ }
+            }
           });
 
           upstreamWs.on("close", (code, reason) => {
@@ -171,6 +248,27 @@ export function startServer(configPath: string, overrides?: Partial<import("./ty
       log(`WS <- ${summary}`);
       if (CONFIG.logRequestBodies) log(`WS frame <- ${raw}`);
 
+      if (isToolResultRequest(raw)) {
+        log("WS tool-result follow-up; returning empty completion");
+        const wsToolResultModel = parseRequestModel(raw) ?? undefined;
+        await streamOverWebSocket(ws, buildFrames("", wsToolResultModel));
+        return;
+      }
+
+      if (CONFIG.learningMode) {
+        log("WS learn mode; forwarding to upstream");
+        const isUtility = isInternalUtilityPrompt(prompt) || isInternalUtilityBody(raw);
+        if (prompt && !isUtility) wsLearnPendingPrompt = prompt;
+        try {
+          const upstream = await ensureUpstream();
+          if (upstream.readyState === upstream.OPEN) upstream.send(data);
+        } catch (error) {
+          log(`WS learn passthrough unavailable: ${(error as Error).message}`);
+          if (ws.readyState === ws.OPEN) ws.close(1011, "WS learn passthrough failed");
+        }
+        return;
+      }
+
       const rules = loadPromptRules();
       const matched = findRule(prompt, rules);
 
@@ -191,8 +289,12 @@ export function startServer(configPath: string, overrides?: Partial<import("./ty
       const responseText = matched
         ? renderOutputText(matched.text, matched.tags)
         : CONFIG.defaultResponse;
+      const wsToolCalls = matched?.toolCalls ?? [];
+      const wsSteps = matched?.steps ?? [];
+      const wsDelayMs = matched?.delayMs ?? 0;
 
-      await streamOverWebSocket(ws, buildFrames(responseText));
+      const wsModel = parseRequestModel(raw) ?? undefined;
+      await streamOverWebSocket(ws, buildFrames(responseText, wsModel, wsToolCalls, wsSteps, wsDelayMs));
     });
 
     ws.on("close", () => {
@@ -248,6 +350,9 @@ export function startServer(configPath: string, overrides?: Partial<import("./ty
       responsesSrc: src,
       caCertPath: caPath(),
       ruleCount,
+      learningMode: CONFIG.learningMode,
+      learnFile: path.resolve(CONFIG.learnFile),
+      learningModeRaw: CONFIG.learningModeRaw,
     });
   });
 }

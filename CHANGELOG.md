@@ -1,5 +1,27 @@
 # Changelog
 
+## [1.2.0] - 2026-06-26
+
+### Added
+
+- **Learning mode** (`copilot-mock-server learn`) — proxies all requests to the real Copilot API and records each interaction to `cms.learn.json` as ready-to-use prompt rules; internal utility requests (title generation, branch names, etc.) are forwarded but not recorded
+- **`--raw` flag for learn mode** — prints the full raw SSE stream for each recorded interaction to the console, useful for inspecting exact upstream response formats
+- **`learnFile` / `learningModeRaw` config options** — configure the learn output file path and raw SSE printing from `cms.config.json`
+- **`toolCalls`** field on prompt rules — emit OpenAI Responses API `function_call` output items alongside the text response so VS Code renders tool executions (file creation, edits, etc.)
+- **`steps`** field on prompt rules — define a multi-step sequence of text blocks and tool calls to simulate an agent that narrates, calls tools, then narrates again; each step supports its own `delayMs`
+- **`outcome`** field on prompt rules — controls what the proxy returns when VS Code sends a follow-up summarization request after a multi-step response completes; falls back to upstream when omitted
+- **`delayMs`** field on prompt rules — pause before the response begins streaming, useful for faking a "thinking" delay on single-output rules
+- **Placeholder resolution** — `{{cwd}}` and `{{home}}` are substituted at stream time in `toolCalls.arguments` strings and response text, making rules portable across machines and projects
+- **Model mirroring** — the model ID from the client request is echoed back in all streamed responses instead of the hardcoded `gpt-mock-1` / `claude-mock-1` strings
+- **`-p` / `--port <number>` CLI flag** — override the listening port from the command line without editing the config file
+- **Tool-result follow-up suppression** — `function_call_output` (Responses API) and `role: tool` (Chat Completions) follow-up requests now return a silent empty completion instead of leaking the `defaultResponse`
+- **Summarization utility detection** — `summarize the following content` requests are now recognised as internal utility requests and, when the last matched rule has an `outcome`, that value is returned instead of forwarding upstream
+
+### Changed
+
+- **Proxy URL order** — the individual endpoint (`api.individual.githubcopilot.com`) is tried first; free/individual-tier tokens work without config changes, and 4xx responses trigger an automatic fallback to the primary team/enterprise URL
+- **Expanded utility-pattern matching** — `isInternalUtilityPrompt` now catches any `"please write a brief … for the following request"` variant (branch names, labels, etc.), not just the title-generation phrase
+
 ## [1.1.0] - 2026-06-26
 
 ### Changed

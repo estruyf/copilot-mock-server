@@ -131,6 +131,33 @@ export function parseIncomingPathname(
   return urlObj.pathname;
 }
 
+export function isToolResultRequest(raw: string): boolean {
+  try {
+    const obj = JSON.parse(raw) as Record<string, unknown>;
+    // Responses API: input array contains function_call_output items
+    if (Array.isArray(obj.input)) {
+      return (obj.input as unknown[]).some(
+        (item) =>
+          item &&
+          typeof item === "object" &&
+          (item as Record<string, unknown>).type === "function_call_output",
+      );
+    }
+    // Chat Completions: messages array contains a tool-role message
+    if (Array.isArray(obj.messages)) {
+      return (obj.messages as unknown[]).some(
+        (msg) =>
+          msg &&
+          typeof msg === "object" &&
+          (msg as Record<string, unknown>).role === "tool",
+      );
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
 export function isMockablePostPath(pathname: string) {
   return /\/(chat\/completions|v1\/chat\/completions|responses|v1\/responses|messages|v1\/messages)$/i.test(
     pathname,
@@ -142,20 +169,22 @@ export function isInternalUtilityPrompt(prompt: string) {
   if (!text.trim()) return false;
 
   return (
-    text.includes("please write a brief title for the following request") ||
+    // Catches "please write a brief title/branch name/label/… for the following request"
+    (text.includes("please write a brief") && text.includes("for the following request")) ||
     text.includes("please generate exactly 10 unique progress messages") ||
     text.includes("predict the next code edit based on user context")
   );
 }
 
 const UTILITY_PATTERNS = [
-  "please write a brief title for the following request",
+  "please write a brief",
   "please generate exactly 10 unique progress messages",
   "predict the next code edit based on user context",
   "generate a title for",
   "generate a short title",
   "write a title for",
   "suggest a title for",
+  "summarize the following content",
 ];
 
 export function isInternalUtilityBody(raw: string): boolean {
@@ -189,6 +218,19 @@ export function isInternalUtilityBody(raw: string): boolean {
 
   const combined = allText.join("\n").toLowerCase();
   return combined.trim() !== "" && UTILITY_PATTERNS.some((p) => combined.includes(p));
+}
+
+export function isSummarizationUtilityBody(raw: string): boolean {
+  return raw.toLowerCase().includes("summarize the following content");
+}
+
+export function parseRequestModel(raw: string): string | null {
+  try {
+    const obj = JSON.parse(raw) as Record<string, unknown>;
+    return typeof obj.model === "string" && obj.model ? obj.model : null;
+  } catch {
+    return null;
+  }
 }
 
 export function sanitizeForwardHeaders(headers: IncomingMessage["headers"]) {

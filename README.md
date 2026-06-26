@@ -44,6 +44,8 @@ copilot-mock-server [command] [options]
 
 Commands:
   (none)              Start the mock server (default)
+  learn               Start in learning mode — proxy and record real responses
+  learn --raw         Learning mode + print the raw SSE stream for each response
   vscode add          Inject proxy settings into .vscode/settings.json
   vscode remove       Remove proxy settings from .vscode/settings.json
   trust-ca            Trust the generated CA cert in the system keychain
@@ -51,6 +53,8 @@ Commands:
 
 Options:
   -c, --config <path>   Path to config file (default: ./cms.config.json)
+  -p, --port <number>   Override the port (default: 3000)
+  --raw                 Print raw SSE output (only applies to learn command)
   -h, --help            Show help
   -v, --version         Print version number
 ```
@@ -106,6 +110,9 @@ By default, `responsesPath` points to `./cms.mock.json`.
 | `forwardUnmatched` | `false` | Set to `true` to proxy unmatched prompts to the real Copilot API |
 | `fallbackBaseUrl` | `https://api.githubcopilot.com` | Primary upstream URL used when forwarding |
 | `fallbackAltBaseUrl` | `https://api.individual.githubcopilot.com` | Alternate upstream URL used when forwarding |
+| `learningMode` | `false` | Set to `true` to record real Copilot responses to `learnFile` instead of mocking |
+| `learnFile` | `./cms.learn.json` | Path to the file where learned responses are written |
+| `learningModeRaw` | `false` | Set to `true` to also print the raw SSE stream to the console for each recorded interaction |
 
 > Keep `logRequestBodies` set to `false` during demos for better streaming performance.
 
@@ -125,7 +132,9 @@ When `responses` is set it takes precedence over `responsesPath`.
 
 ## Prompt Rules Format
 
-Rules are loaded from the file at `responsesPath` (or from the inline `responses` field). Each rule defines keywords to match and the response to return:
+Rules are loaded from the file at `responsesPath` (or from the inline `responses` field). Each rule defines keywords to match and the response to return.
+
+### Simple text response
 
 ```json
 [
@@ -133,40 +142,83 @@ Rules are loaded from the file at `responsesPath` (or from the inline `responses
     "input": ["joke"],
     "title": "Developer Joke",
     "output": "Why did the developer go broke? Because he used up all his cache."
-  },
-  {
-    "input": ["Let me check if this is working with Demo Time"],
-    "output": "Yes, it seems to be working with Demo Time."
-  },
-  {
-    "input": ["Can you create a `test.json` file?"],
-    "output": {
-      "text": "Created [[file:test.json]] with your content in JSON format.",
-      "tags": [
-        {
-          "type": "file",
-          "path": "test.json",
-          "label": "test.json"
-        }
-      ]
-    }
   }
 ]
 ```
 
-### Rule matching
+### Response with a startup delay
 
-- All entries in `input` must appear in the user prompt (case-insensitive) for a rule to match.
-- Single-word entries are matched as whole tokens; multi-word entries are matched as substrings.
-- When multiple rules match, the most specific one wins: most required tokens first, then longest total token length, then document order.
-- If no rule matches and `forwardUnmatched` is `false`, `defaultResponse` is returned.
-- If no rule matches and `forwardUnmatched` is `true`, the request is proxied to the real Copilot API.
+Use `delayMs` to pause before the response starts streaming. This is useful for faking a "thinking" pause on a single-output rule:
 
-### Chat title generation
+```json
+{
+  "input": ["joke"],
+  "output": "Why did the developer go broke? Because he used up all his cache.",
+  "delayMs": 1500
+}
+```
 
-When VS Code opens a new chat it sends an internal title-generation request on `/chat/completions`. If the matched rule has a `title` field, that value is returned as the chat title. If not, the request is forwarded upstream so VS Code can generate a real title.
+### Response with tool calls
 
-## Output Tags (Clickable File Links)
+Use `toolCalls` to emit function-call output items alongside the text. VS Code renders these as the agent executing tools (file creation, edits, etc.):
+
+```json
+{
+  "input": ["create", "test.json"],
+  "output": "Created [test.json](test.json) with some dummy content.",
+  "toolCalls": [
+    {
+      "name": "create_file",
+      "arguments": "{\"filePath\":\"{{cwd}}/test.json\",\"content\":\"{\\\"hello\\\":\\\"world\\\"}\"}"
+    }
+  ]
+}
+```
+
+> Tools can be found in the [toolNames.ts](https://github.com/microsoft/vscode/blob/main/extensions/copilot/src/extension/tools/common/toolNames.ts) file in the VS Code repo. 
+> You can also discover them by running the `copilot-mock-server` in learning mode and inspecting the `toolCalls` in the recorded responses.
+
+#### Placeholders
+
+Tool call arguments and response text often need absolute file paths, which differ between machines and projects. Use these placeholders in `arguments` strings and `text` fields — they are resolved at stream time:
+
+| Placeholder | Resolved value |
+|---|---|
+| `{{cwd}}` | The server's current working directory (i.e. the project root) |
+| `{{home}}` | The current user's home directory |
+
+### Multi-step response (faking thinking)
+
+Use `steps` to emit a sequence of message and tool-call output items, simulating an agent that narrates, calls tools, then narrates again. Each step can have its own `delayMs` to add a pause before that step begins.
+
+```json
+{
+  "input": ["create a sample typescript file"],
+  "steps": [
+    {
+      "text": "Let me check what I can use for the sample TypeScript file.",
+      "delayMs": 200
+    },
+    {
+      "text": "Creating the TypeScript file now.",
+      "delayMs": 300,
+      "toolCalls": [
+        {
+          "name": "create_file",
+          "arguments": "{\"filePath\":\"{{cwd}}/add.ts\",\"content\":\"export function add(a: number, b: number): number {\\n  return a + b;\\n}\\n\"}"
+        }
+      ]
+    }
+  ],
+  "outcome": "Created add.ts"
+}
+```
+
+The optional `outcome` field controls what the proxy returns when the client sends a follow-up summarization request after the steps complete (e.g. "Summarize the following content in a single sentence…"). If `outcome` is defined, its value is streamed back as the summary — placeholders like `{{cwd}}` are resolved at that point. If `outcome` is omitted, the summarization request is forwarded to the real upstream so the client can generate its own summary.
+
+The `steps` field overrides `output` and `toolCalls` when present. Steps are emitted as separate `response.output_item` events — each text block and each tool call is its own output item. The `delayMs` on a step pauses before that step's first frame, so the loading spinner appears immediately but content arrives after the delay.
+
+### Clickable file links
 
 Responses can include clickable file links rendered as markdown. Two syntaxes are supported:
 
@@ -181,14 +233,92 @@ Responses can include clickable file links rendered as markdown. Two syntaxes ar
 
 ```json
 {
-  "text": "Here is your file.",
-  "tags": [
-    { "type": "file", "path": "path/to/file.ext", "label": "Open file" }
-  ]
+  "input": ["check", "working"],
+  "output": {
+    "text": "Created [[file:test.json]] with your content in JSON format.",
+    "tags": [
+      { "type": "file", "path": "test.json", "label": "test.json" }
+    ]
+  }
 }
 ```
 
 Both render as markdown links in the chat response.
+
+### Rule matching
+
+- All entries in `input` must appear in the user prompt (case-insensitive) for a rule to match.
+- Single-word entries are matched as whole tokens; multi-word entries are matched as substrings.
+- When multiple rules match, the most specific one wins: most required tokens first, then longest total token length, then document order.
+- If no rule matches and `forwardUnmatched` is `false`, `defaultResponse` is returned.
+- If no rule matches and `forwardUnmatched` is `true`, the request is proxied to the real Copilot API.
+
+### Chat title generation
+
+When VS Code opens a new chat it sends an internal title-generation request on `/chat/completions`. If the matched rule has a `title` field, that value is returned as the chat title. If not, the request is forwarded upstream so VS Code can generate a real title.
+
+## Learning Mode
+
+Learning mode records real Copilot responses so you can replay them later without hitting the API.
+
+```bash
+copilot-mock-server learn
+```
+
+All requests are forwarded to the real Copilot API. Each response is written to the learn file (`./cms.learn.json` by default) as a ready-to-use prompt rule. Internal utility requests such as chat title and branch name generation are forwarded but not recorded.
+
+Once you have captured what you need, stop the server and copy entries from the learn file into your mock rules file (the one pointed to by `responsesPath`).
+
+### Learn file format
+
+Each recorded interaction is written as a single `PromptRule` entry. The full prompt text is stored as a single-element `input` array so it is easy to read and trim down to keywords:
+
+```json
+[
+  {
+    "input": ["Create me a demo yaml file with some fake content."],
+    "output": "Here is a sample YAML file:\n\n```yaml\nname: demo\n..."
+  }
+]
+```
+
+Edit the `input` array to the keywords you actually want to match on before using the file as a mock.
+
+### Raw output
+
+Pass `--raw` to also print the raw SSE stream for each recorded interaction directly to the console. This is useful for inspecting the exact response format coming from the upstream API:
+
+```bash
+copilot-mock-server learn --raw
+```
+
+Each interaction will show the normal recording summary followed by the full SSE body:
+
+```
+  ◉ LEARN  "Create me a demo yaml file with some fake content."
+           1234 chars → /path/to/cms.learn.json
+
+  RAW SSE
+  ────────────────────────────────────────────────────────────
+  event: response.created
+  data: {"type":"response.created","response":{...}}
+  event: response.output_text.delta
+  data: {"type":"response.output_text.delta","delta":"Here",...}
+  ...
+  ────────────────────────────────────────────────────────────
+```
+
+### Config options
+
+The learn file path and raw mode can also be set in `cms.config.json`:
+
+```json
+{
+  "learningMode": true,
+  "learnFile": "./cms.learn.json",
+  "learningModeRaw": false
+}
+```
 
 ## VS Code Copilot Override Settings
 

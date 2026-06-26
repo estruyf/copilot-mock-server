@@ -1,8 +1,15 @@
+import os from "node:os";
 import type { ServerResponse } from "node:http";
 import WebSocket from "ws";
 import { CONFIG } from "./config.js";
 import { sleep, rid } from "./logger.js";
-import type { ChunkMode, MessageItem } from "./types.js";
+import type { ChunkMode, MessageItem, NormalizedStep, ToolCall } from "./types.js";
+
+function replacePlaceholders(str: string): string {
+  return str
+    .replace(/\{\{cwd\}\}/g, process.cwd())
+    .replace(/\{\{home\}\}/g, os.homedir());
+}
 
 export function chunkText(text: string, mode: ChunkMode): string[] {
   if (mode === "char") return [...text];
@@ -27,13 +34,14 @@ export function responseSnapshot(
   id: string,
   status: "in_progress" | "completed",
   text: string,
+  model = "gpt-mock-1",
 ) {
   return {
     id,
     object: "response",
     created_at: Math.floor(Date.now() / 1000),
     status,
-    model: "gpt-mock-1",
+    model,
     output:
       status === "completed" && text
         ? [messageItem(rid("msg"), "completed", text)]
@@ -45,9 +53,46 @@ export function responseSnapshot(
   };
 }
 
-export function buildFrames(fullText: string) {
-  const responseId = rid("resp");
+function pushTextItem(
+  rawText: string,
+  outputIndex: number,
+  push: (event: Record<string, unknown>, delayMs?: number) => void,
+  preDelayMs = 0,
+) {
+  const text = replacePlaceholders(rawText);
   const itemId = rid("msg");
+  push({ type: "response.output_item.added", output_index: outputIndex, item: messageItem(itemId, "in_progress", "") }, preDelayMs);
+  push({ type: "response.content_part.added", item_id: itemId, output_index: outputIndex, content_index: 0, part: { type: "output_text", text: "", annotations: [] } });
+  for (const tok of chunkText(text, CONFIG.chunkBy)) {
+    push({ type: "response.output_text.delta", item_id: itemId, output_index: outputIndex, content_index: 0, delta: tok }, CONFIG.tokenDelayMs);
+  }
+  push({ type: "response.output_text.done", item_id: itemId, output_index: outputIndex, content_index: 0, text });
+  push({ type: "response.content_part.done", item_id: itemId, output_index: outputIndex, content_index: 0, part: { type: "output_text", text, annotations: [] } });
+  push({ type: "response.output_item.done", output_index: outputIndex, item: messageItem(itemId, "completed", text) });
+}
+
+function pushFunctionCallItem(
+  tc: ToolCall,
+  outputIndex: number,
+  push: (event: Record<string, unknown>, delayMs?: number) => void,
+  preDelayMs = 0,
+) {
+  const callId = rid("fc");
+  const callRefId = rid("call");
+  const resolvedArgs = replacePlaceholders(tc.arguments);
+  push({ type: "response.output_item.added", output_index: outputIndex, item: { type: "function_call", id: callId, call_id: callRefId, name: tc.name, status: "in_progress" } }, preDelayMs);
+  push({ type: "response.function_call.arguments.done", item_id: callId, output_index: outputIndex, call_id: callRefId, arguments: resolvedArgs });
+  push({ type: "response.output_item.done", output_index: outputIndex, item: { type: "function_call", id: callId, call_id: callRefId, name: tc.name, arguments: resolvedArgs, status: "completed" } });
+}
+
+export function buildFrames(
+  fullText: string,
+  model?: string,
+  toolCalls: ToolCall[] = [],
+  steps: NormalizedStep[] = [],
+  delayMs = 0,
+) {
+  const responseId = rid("resp");
   const frames: Array<{ event: Record<string, unknown>; delayMs: number }> = [];
   let seq = 0;
 
@@ -56,71 +101,39 @@ export function buildFrames(fullText: string) {
     frames.push({ event, delayMs });
   };
 
-  push({
-    type: "response.created",
-    response: responseSnapshot(responseId, "in_progress", ""),
-  });
-  push({
-    type: "response.in_progress",
-    response: responseSnapshot(responseId, "in_progress", ""),
-  });
-  push({
-    type: "response.output_item.added",
-    output_index: 0,
-    item: messageItem(itemId, "in_progress", ""),
-  });
-  push({
-    type: "response.content_part.added",
-    item_id: itemId,
-    output_index: 0,
-    content_index: 0,
-    part: { type: "output_text", text: "", annotations: [] },
-  });
+  push({ type: "response.created", response: responseSnapshot(responseId, "in_progress", "", model) });
+  push({ type: "response.in_progress", response: responseSnapshot(responseId, "in_progress", "", model) });
 
-  for (const tok of chunkText(fullText, CONFIG.chunkBy)) {
-    push(
-      {
-        type: "response.output_text.delta",
-        item_id: itemId,
-        output_index: 0,
-        content_index: 0,
-        delta: tok,
-      },
-      CONFIG.tokenDelayMs,
-    );
+  if (steps.length > 0) {
+    let outputIndex = 0;
+    let lastText = "";
+    for (const step of steps) {
+      const stepDelay = step.delayMs;
+      let firstInStep = true;
+      if (step.text) {
+        pushTextItem(step.text, outputIndex++, push, firstInStep ? stepDelay : 0);
+        firstInStep = false;
+        lastText = step.text;
+      }
+      for (const tc of step.toolCalls) {
+        pushFunctionCallItem(tc, outputIndex++, push, firstInStep ? stepDelay : 0);
+        firstInStep = false;
+      }
+    }
+    push({ type: "response.completed", response: responseSnapshot(responseId, "completed", lastText, model) });
+  } else {
+    pushTextItem(fullText, 0, push, delayMs);
+    toolCalls.forEach((tc, i) => pushFunctionCallItem(tc, i + 1, push));
+    push({ type: "response.completed", response: responseSnapshot(responseId, "completed", fullText, model) });
   }
-
-  push({
-    type: "response.output_text.done",
-    item_id: itemId,
-    output_index: 0,
-    content_index: 0,
-    text: fullText,
-  });
-  push({
-    type: "response.content_part.done",
-    item_id: itemId,
-    output_index: 0,
-    content_index: 0,
-    part: { type: "output_text", text: fullText, annotations: [] },
-  });
-  push({
-    type: "response.output_item.done",
-    output_index: 0,
-    item: messageItem(itemId, "completed", fullText),
-  });
-  push({
-    type: "response.completed",
-    response: responseSnapshot(responseId, "completed", fullText),
-  });
 
   return frames;
 }
 
-export function buildChatCompletionsChunks(fullText: string) {
+export function buildChatCompletionsChunks(fullText: string, model = "gpt-mock-1") {
   const id = rid("chatcmpl");
   const created = Math.floor(Date.now() / 1000);
-  const model = "gpt-mock-1";
+  const text = replacePlaceholders(fullText);
   const chunks: Array<Record<string, unknown>> = [];
 
   chunks.push({
@@ -137,7 +150,7 @@ export function buildChatCompletionsChunks(fullText: string) {
     ],
   });
 
-  for (const tok of chunkText(fullText, CONFIG.chunkBy)) {
+  for (const tok of chunkText(text, CONFIG.chunkBy)) {
     chunks.push({
       id,
       object: "chat.completion.chunk",
@@ -215,9 +228,8 @@ export async function streamOverChatCompletionsSSE(
   res.end();
 }
 
-export function buildAnthropicMessagesEvents(fullText: string) {
+export function buildAnthropicMessagesEvents(fullText: string, model = "claude-mock-1") {
   const id = rid("msg");
-  const model = "claude-mock-1";
   const events: Array<{ event: string; data: Record<string, unknown> }> = [];
 
   events.push({

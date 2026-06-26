@@ -15,6 +15,9 @@ export const DEFAULTS: Config = {
   forwardUnmatched: false,
   fallbackBaseUrl: "https://api.githubcopilot.com",
   fallbackAltBaseUrl: "https://api.individual.githubcopilot.com",
+  learningMode: false,
+  learnFile: "./cms.learn.json",
+  learningModeRaw: false,
 };
 
 export let CONFIG: Config = { ...DEFAULTS };

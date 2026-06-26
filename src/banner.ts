@@ -20,8 +20,11 @@ export function printBanner(opts: {
   responsesSrc: string;
   caCertPath: string;
   ruleCount: number;
+  learningMode?: boolean;
+  learnFile?: string;
+  learningModeRaw?: boolean;
 }): void {
-  const { port, configPath, responsesSrc, caCertPath, ruleCount } = opts;
+  const { port, configPath, responsesSrc, caCertPath, ruleCount, learningMode, learnFile, learningModeRaw } = opts;
   const sep = `${DIM}${"─".repeat(52)}${R}`;
   const rules = `${ruleCount} rule${ruleCount !== 1 ? "s" : ""}`;
 
@@ -37,13 +40,26 @@ export function printBanner(opts: {
     `  ${lbl("Responses")}${responsesSrc}  ${DIM}(${rules})${R}`,
     `  ${lbl("CA cert")}${caCertPath}`,
     "",
-    `  ${YELLOW}Hint${R}  Trust the CA : ${BOLD}copilot-mock-server trust-ca${R}`,
-    `        Or set env  : ${DIM}NODE_EXTRA_CA_CERTS="${caCertPath}" <command>${R}`,
-    "",
-    `  ${sep}`,
-    `  ${DIM}Press Ctrl+C to stop${R}`,
-    "",
   ];
+
+  if (learningMode) {
+    const modeLabel = learningModeRaw ? "LEARNING MODE + RAW" : "LEARNING MODE";
+    lines.push(
+      `  ${sep}`,
+      `  ${YELLOW}◉ ${modeLabel}${R}  Responses are proxied and recorded`,
+      `  ${lbl("Learn file")}${learnFile ?? "./cms.learn.json"}`,
+      `  ${DIM}Copy entries from the learn file into your mock file when done.${R}`,
+      "",
+    );
+  } else {
+    lines.push(
+      `  ${YELLOW}Hint${R}  Trust the CA : ${BOLD}copilot-mock-server trust-ca${R}`,
+      `        Or set env  : ${DIM}NODE_EXTRA_CA_CERTS="${caCertPath}" <command>${R}`,
+      "",
+    );
+  }
+
+  lines.push(`  ${sep}`, `  ${DIM}Press Ctrl+C to stop${R}`, "");
 
   process.stdout.write(lines.join("\n") + "\n");
 }

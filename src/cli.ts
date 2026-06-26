@@ -14,6 +14,9 @@ Usage: copilot-mock-server [command] [options]
 
 Commands:
   (none)              Start the mock server (default)
+  learn               Start in learning mode — proxy all requests and record
+                      responses to cms.learn.json for use as mock rules
+                      Use --raw to also print the raw SSE stream to the console
   vscode add          Inject proxy settings into .vscode/settings.json
   vscode remove       Remove proxy settings from .vscode/settings.json
   trust-ca            Trust the generated CA cert in the system keychain
@@ -26,6 +29,8 @@ Options:
   -v, --version         Print version number
 
 Examples:
+  copilot-mock-server
+  copilot-mock-server learn
   copilot-mock-server wrap copilot
   copilot-mock-server --port 8080 wrap copilot
   copilot-mock-server -c ./my-config.json wrap copilot
@@ -35,6 +40,7 @@ const args = process.argv.slice(2);
 
 let configPath = "./cms.config.json";
 let portOverride: number | undefined;
+let rawMode = false;
 const positional: string[] = [];
 let wrapArgs: string[] = [];
 
@@ -54,6 +60,8 @@ for (let i = 0; i < args.length; i++) {
       process.exit(1);
     }
     portOverride = parsed;
+  } else if (args[i] === "--raw") {
+    rawMode = true;
   } else if (args[i] === "wrap") {
     wrapArgs = args.slice(i + 1);
     positional.push("wrap");
@@ -108,7 +116,9 @@ if (command === "wrap") {
     }
   } else if (process.platform === "linux") {
     console.log("To trust on Ubuntu/Debian:");
-    console.log(`  sudo cp "${ca}" /usr/local/share/ca-certificates/copilot-mock-server.crt`);
+    console.log(
+      `  sudo cp "${ca}" /usr/local/share/ca-certificates/copilot-mock-server.crt`,
+    );
     console.log("  sudo update-ca-certificates");
   } else {
     console.log("Add the cert to your system trust store, or use:");
@@ -125,6 +135,15 @@ if (command === "wrap") {
     console.error("Usage: copilot-mock-server vscode <add|remove>");
     process.exit(1);
   }
+} else if (command === "learn") {
+  startServer(configPath, {
+    ...(portOverride !== undefined ? { port: portOverride } : {}),
+    learningMode: true,
+    learningModeRaw: rawMode,
+  });
 } else {
-  startServer(configPath, portOverride !== undefined ? { port: portOverride } : undefined);
+  startServer(
+    configPath,
+    portOverride !== undefined ? { port: portOverride } : undefined,
+  );
 }
