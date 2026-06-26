@@ -13,10 +13,19 @@ export async function proxyHttpToUpstream(
   const method = String(req.method || "GET").toUpperCase();
   const headers = sanitizeForwardHeaders(req.headers);
 
-  const urls = [
-    `${CONFIG.fallbackBaseUrl}${pathWithQuery}`,
-    `${CONFIG.fallbackAltBaseUrl}${pathWithQuery}`,
-  ];
+  // When the request arrives through a CONNECT tunnel the Host header carries
+  // the real target host (e.g. github.com). Forward there directly instead of
+  // routing everything through the Copilot API fallback URLs.
+  const rawHost = (req.headers.host ?? "").replace(/:(?:443|80)$/, "");
+  const isLocalhost =
+    !rawHost || rawHost === "localhost" || rawHost.startsWith("127.");
+
+  const urls = isLocalhost
+    ? [
+        `${CONFIG.fallbackBaseUrl}${pathWithQuery}`,
+        `${CONFIG.fallbackAltBaseUrl}${pathWithQuery}`,
+      ]
+    : [`https://${rawHost}${pathWithQuery}`];
 
   let lastError: Error | null = null;
   for (const url of urls) {
@@ -30,16 +39,29 @@ export async function proxyHttpToUpstream(
 
       const responseHeaders: Record<string, string> = {};
       upstream.headers.forEach((v, k) => {
-        if (k.toLowerCase() !== "transfer-encoding") responseHeaders[k] = v;
+        const lower = k.toLowerCase();
+        // transfer-encoding: Node.js handles chunking for us
+        // content-encoding: undici auto-decompresses but keeps this header — body
+        //   is already plain text so forwarding "gzip" would corrupt the response
+        // content-length: refers to the compressed size; wrong after decompression
+        if (
+          lower === "transfer-encoding" ||
+          lower === "content-encoding" ||
+          lower === "content-length"
+        ) {
+          return;
+        }
+        responseHeaders[k] = v;
       });
 
       res.writeHead(upstream.status, responseHeaders);
       if (upstream.body) {
         for await (const chunk of upstream.body) {
+          if (res.writableEnded) break;
           res.write(chunk);
         }
       }
-      res.end();
+      if (!res.writableEnded) res.end();
       log(
         `HTTP passthrough ${method} ${req.url || "/"} -> ${url} (${upstream.status})`,
       );
@@ -50,13 +72,15 @@ export async function proxyHttpToUpstream(
     }
   }
 
-  res.writeHead(502, { "Content-Type": "application/json" });
-  res.end(
-    JSON.stringify({
-      error: "Upstream passthrough failed",
-      detail: lastError?.message || "unknown error",
-    }),
-  );
+  if (!res.headersSent) {
+    res.writeHead(502, { "Content-Type": "application/json" });
+    res.end(
+      JSON.stringify({
+        error: "Upstream passthrough failed",
+        detail: lastError?.message || "unknown error",
+      }),
+    );
+  }
 }
 
 export async function connectWsFallback(req: IncomingMessage): Promise<WebSocket> {

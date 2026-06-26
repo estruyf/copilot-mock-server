@@ -7,6 +7,8 @@ Supports both transports Copilot can use:
 - WebSocket
 - HTTP POST with `text/event-stream`
 
+Also works as an **HTTPS interception proxy** — Copilot CLI and other tools that respect `HTTPS_PROXY` can be pointed at the server directly without any VS Code settings changes.
+
 ## Quick Start
 
 **Via npx (no install required):**
@@ -30,6 +32,24 @@ npm start
 ```
 
 Server defaults to `http://localhost:3000` and reads config from `./cms.config.json` in the current directory.
+
+## Commands
+
+```
+copilot-mock-server [command] [options]
+
+Commands:
+  (none)              Start the mock server (default)
+  vscode add          Inject proxy settings into .vscode/settings.json
+  vscode remove       Remove proxy settings from .vscode/settings.json
+  trust-ca            Trust the generated CA cert in the system keychain
+  wrap <cmd> [args]   Run a command with HTTPS_PROXY pointed at the mock server
+
+Options:
+  -c, --config <path>   Path to config file (default: ./cms.config.json)
+  -h, --help            Show help
+  -v, --version         Print version number
+```
 
 ## Configuration
 
@@ -194,4 +214,57 @@ If you prefer to add the settings by hand, add them to `.vscode/settings.json`:
   "github.copilot.advanced.debug.overrideCapiUrl": "http://localhost:3000",
   "github.copilot.advanced.debug.overrideAuthType": "token"
 }
+```
+
+## HTTPS Proxy (Copilot CLI and other tools)
+
+The server also works as a full HTTPS interception proxy for any tool that respects `HTTPS_PROXY` — including the Copilot CLI. Non-Copilot traffic (GitHub auth, `api.github.com`, etc.) is forwarded transparently to the real servers.
+
+### One-time CA setup
+
+The server generates a self-signed CA certificate the first time it starts, stored at `~/.copilot-mock-server/ca.crt`. Trust it once:
+
+```bash
+copilot-mock-server trust-ca
+```
+
+This runs `sudo security add-trusted-cert` on macOS, or prints the equivalent command on Linux. On any platform you can also trust it per-process via the `NODE_EXTRA_CA_CERTS` environment variable (see below).
+
+### Using the `wrap` command
+
+`wrap` starts any command with `HTTPS_PROXY` already set to the mock server's address. The port is read from the config file, so `-c` works too:
+
+```bash
+# Start the mock server
+copilot-mock-server
+
+# In another terminal — wrap copilot
+copilot-mock-server wrap copilot
+
+# With a custom config
+copilot-mock-server -c ./my-config.json wrap copilot
+```
+
+`wrap` sets all four proxy environment variables (`HTTPS_PROXY`, `https_proxy`, `HTTP_PROXY`, `http_proxy`) so the proxied process picks them up regardless of case.
+
+### Manual proxy setup
+
+If you prefer to set the environment variable yourself:
+
+```bash
+HTTPS_PROXY=http://localhost:3000 copilot
+```
+
+### Without system trust (per-process)
+
+If you don't want to trust the CA system-wide, pass it directly to the target process:
+
+```bash
+NODE_EXTRA_CA_CERTS="$HOME/.copilot-mock-server/ca.crt" copilot-mock-server wrap copilot
+```
+
+Or manually:
+
+```bash
+NODE_EXTRA_CA_CERTS="$HOME/.copilot-mock-server/ca.crt" HTTPS_PROXY=http://localhost:3000 copilot
 ```

@@ -2,7 +2,7 @@
   "name": "copilot-mock-server",
   "version": "1.0.0",
   "type": "module",
-  "description": "Fake GitHub Copilot Chat backend (WebSocket + SSE) for deterministic demos",
+  "description": "Local MITM proxy that intercepts GitHub Copilot Chat traffic and replays scripted responses via WebSocket and SSE for deterministic demos",
   "bin": {
     "copilot-mock-server": "./dist/cli.js"
   },
@@ -17,6 +17,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "node-forge": "^1.4.0",
     "ws": "^8.18.0"
   },
   "engines": {
@@ -24,6 +25,7 @@
   },
   "devDependencies": {
     "@types/node": "^24.0.10",
+    "@types/node-forge": "^1.3.14",
     "@types/ws": "^8.18.1",
     "tsx": "^4.20.3",
     "typescript": "^5.8.3"

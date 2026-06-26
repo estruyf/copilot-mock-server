@@ -1,6 +1,8 @@
 import http from "node:http";
 import path from "node:path";
+import tls from "node:tls";
 import WebSocket, { WebSocketServer } from "ws";
+import { certForHost, initCerts, caPath } from "./cert.js";
 import { CONFIG, initConfig } from "./config.js";
 import { log } from "./logger.js";
 import {
@@ -24,6 +26,7 @@ import { proxyHttpToUpstream, connectWsFallback } from "./proxy.js";
 
 export function startServer(configPath: string) {
   initConfig(configPath);
+  initCerts();
 
   const server = http.createServer((req, res) => {
     let body = "";
@@ -201,6 +204,37 @@ export function startServer(configPath: string) {
     });
   });
 
+  server.on("connect", (req, clientSocket, head) => {
+    const hostPort = req.url ?? "";
+    const colonIdx = hostPort.lastIndexOf(":");
+    const hostname = colonIdx !== -1 ? hostPort.slice(0, colonIdx) : hostPort;
+
+    if (!hostname) {
+      clientSocket.destroy();
+      return;
+    }
+
+    log(`CONNECT ${hostPort}`);
+    clientSocket.write("HTTP/1.1 200 Connection Established\r\n\r\n");
+
+    if (head?.length) {
+      clientSocket.unshift(head);
+    }
+
+    const { cert, key } = certForHost(hostname);
+    const tlsSocket = new tls.TLSSocket(clientSocket, {
+      isServer: true,
+      cert,
+      key,
+      ALPNProtocols: ["http/1.1"],
+    });
+    tlsSocket.once("error", (err) => {
+      log(`TLS error for ${hostname}: ${(err as Error).message}`);
+    });
+
+    server.emit("connection", tlsSocket);
+  });
+
   server.listen(CONFIG.port, () => {
     log(`Mock Copilot backend listening on http://localhost:${CONFIG.port}`);
     log(`WebSocket upgrades accepted on ws://localhost:${CONFIG.port}`);
@@ -209,6 +243,9 @@ export function startServer(configPath: string) {
       ? "inline responses[]"
       : path.resolve(CONFIG.responsesPath);
     log(`Responses source: ${src}`);
+    log(`CA cert: ${caPath()}`);
+    log(`  Trust it: copilot-mock-server trust-ca`);
+    log(`  Or set:   NODE_EXTRA_CA_CERTS="${caPath()}" <command>`);
     log(`Loaded ${loadPromptRules().length} prompt rule(s)`);
   });
 }
