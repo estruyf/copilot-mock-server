@@ -272,3 +272,7 @@ Or manually:
 ```bash
 NODE_EXTRA_CA_CERTS="$HOME/.copilot-mock-server/ca.crt" HTTPS_PROXY=http://localhost:3000 copilot
 ```
+
+<p align="center">
+  <a href="https://visitorbadge.io/status?path=https%3A%2F%2Fgithub.com%2Festruyf%2Fcopilot-mock-server"><img src="https://api.visitorbadge.io/api/visitors?path=https%3A%2F%2Fgithub.com%2Festruyf%2Fcopilot-mock-server&countColor=%23263759" /></a>
+</p>
