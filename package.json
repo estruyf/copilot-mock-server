@@ -16,10 +16,6 @@
     "start": "npm run build && node dist/cli.js",
     "typecheck": "tsc --noEmit"
   },
-  "dependencies": {
-    "node-forge": "^1.4.0",
-    "ws": "^8.18.0"
-  },
   "author": "Elio Struyf <elio@struyfconsulting.be> (https://eliostruyf.com)",
   "license": "MIT",
   "keywords": [
@@ -41,7 +37,11 @@
   },
   "homepage": "https://github.com/estruyf/copilot-mock-server#readme",
   "engines": {
-    "node": ">=18"
+    "node": ">=22"
+  },
+  "dependencies": {
+    "node-forge": "^1.4.0",
+    "ws": "^8.18.0"
   },
   "devDependencies": {
     "@types/node": "^24.0.10",
