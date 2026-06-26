@@ -20,7 +20,9 @@ function assertAllowedPath(filePath: string): void {
     resolved.startsWith(path.resolve(root) + path.sep),
   );
   if (!allowed) {
-    throw new Error(`Refusing to access path outside allowed directories: ${resolved}`);
+    throw new Error(
+      `Refusing to access path outside allowed directories: ${resolved}`,
+    );
   }
 }
 
@@ -34,7 +36,10 @@ function readRaw(filePath: string): string {
 }
 
 function confirm(question: string): Promise<boolean> {
-  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  });
   return new Promise((resolve) => {
     rl.question(question, (answer) => {
       rl.close();
@@ -66,14 +71,18 @@ export async function addVSCodeSettings(port: number): Promise<void> {
 
   // Apply each key surgically, preserving existing content and comments.
   for (const [key, value] of Object.entries(newValues)) {
-    const edits = modify(raw, [key], value, { formattingOptions: { insertSpaces: true, tabSize: 2 } });
+    const edits = modify(raw, [key], value, {
+      formattingOptions: { insertSpaces: true, tabSize: 2 },
+    });
     raw = applyEdits(raw, edits);
   }
 
   fs.mkdirSync(path.dirname(SETTINGS_PATH), { recursive: true });
   fs.writeFileSync(SETTINGS_PATH, raw, "utf8");
   console.log(`Updated: ${SETTINGS_PATH}`);
-  console.log("\nReload your VS Code window to activate the mock server for this session.");
+  console.log(
+    "\nReload your VS Code window to activate the mock server for this session.",
+  );
   console.log("Run `copilot-mock-server vscode remove` to undo.");
 }
 
@@ -91,7 +100,9 @@ export function removeVSCodeSettings(): void {
 
   for (const key of MOCK_KEYS) {
     if (key in parsed) {
-      const edits = modify(raw, [key], undefined, { formattingOptions: { insertSpaces: true, tabSize: 2 } });
+      const edits = modify(raw, [key], undefined, {
+        formattingOptions: { insertSpaces: true, tabSize: 2 },
+      });
       raw = applyEdits(raw, edits);
       removed++;
     }
