@@ -1,4 +1,4 @@
-# Fake GitHub Copilot Chat Backend
+# GitHub Copilot Mock Server aka `copilot-mock-server`
 
 A TypeScript mock server that intercepts GitHub Copilot Chat requests and returns deterministic, scripted responses. Useful for demos, recordings, and testing Copilot-integrated tooling without hitting the real API.
 
