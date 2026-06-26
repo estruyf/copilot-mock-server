@@ -25,8 +25,9 @@ import {
 } from "./streaming.js";
 import { proxyHttpToUpstream, connectWsFallback } from "./proxy.js";
 
-export function startServer(configPath: string) {
+export function startServer(configPath: string, overrides?: Partial<import("./types.js").Config>) {
   initConfig(configPath);
+  if (overrides) Object.assign(CONFIG, overrides);
   initCerts();
 
   const server = http.createServer((req, res) => {

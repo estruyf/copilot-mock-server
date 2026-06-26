@@ -9,6 +9,10 @@ Supports both transports Copilot can use:
 
 Also works as an **HTTPS interception proxy** — Copilot CLI and other tools that respect `HTTPS_PROXY` can be pointed at the server directly without any VS Code settings changes.
 
+## Samples
+
+Looking for real-world examples? Check out [demo-time-github-copilot-mocking](https://github.com/estruyf/demo-time-github-copilot-mocking) — a repository with Demo Time samples showing how to use this proxy for scripted demos.
+
 ## Quick Start
 
 **Via npx (no install required):**

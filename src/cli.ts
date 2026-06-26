@@ -17,21 +17,24 @@ Commands:
   vscode add          Inject proxy settings into .vscode/settings.json
   vscode remove       Remove proxy settings from .vscode/settings.json
   trust-ca            Trust the generated CA cert in the system keychain
-  wrap <cmd> [args]   Run a command with HTTPS_PROXY pointed at the mock server
+  wrap <cmd> [args]   Start the mock server and run a command with HTTPS_PROXY pointed at it
 
 Options:
   -c, --config <path>   Path to config file (default: ./cms.config.json)
+  -p, --port <number>   Override the port (default: 3000)
   -h, --help            Show this help message
   -v, --version         Print version number
 
 Examples:
   copilot-mock-server wrap copilot
+  copilot-mock-server --port 8080 wrap copilot
   copilot-mock-server -c ./my-config.json wrap copilot
 `.trim();
 
 const args = process.argv.slice(2);
 
 let configPath = "./cms.config.json";
+let portOverride: number | undefined;
 const positional: string[] = [];
 let wrapArgs: string[] = [];
 
@@ -44,6 +47,13 @@ for (let i = 0; i < args.length; i++) {
     process.exit(0);
   } else if ((args[i] === "-c" || args[i] === "--config") && args[i + 1]) {
     configPath = args[++i];
+  } else if ((args[i] === "-p" || args[i] === "--port") && args[i + 1]) {
+    const parsed = parseInt(args[++i], 10);
+    if (isNaN(parsed) || parsed < 1 || parsed > 65535) {
+      console.error(`Invalid port: ${args[i]}`);
+      process.exit(1);
+    }
+    portOverride = parsed;
   } else if (args[i] === "wrap") {
     wrapArgs = args.slice(i + 1);
     positional.push("wrap");
@@ -61,7 +71,8 @@ if (command === "wrap") {
     process.exit(1);
   }
   initConfig(configPath);
-  const proxyUrl = `http://localhost:${CONFIG.port}`;
+  const port = portOverride ?? CONFIG.port;
+  const proxyUrl = `http://localhost:${port}`;
   const [cmd, ...cmdArgs] = wrapArgs;
   const child = spawn(cmd, cmdArgs, {
     stdio: "inherit",
@@ -71,6 +82,7 @@ if (command === "wrap") {
       https_proxy: proxyUrl,
       HTTP_PROXY: proxyUrl,
       http_proxy: proxyUrl,
+      NODE_EXTRA_CA_CERTS: caPath(),
     },
   });
   child.on("error", (err) => {
@@ -104,8 +116,9 @@ if (command === "wrap") {
   }
 } else if (command === "vscode") {
   initConfig(configPath);
+  const port = portOverride ?? CONFIG.port;
   if (subcommand === "add") {
-    await addVSCodeSettings(CONFIG.port);
+    await addVSCodeSettings(port);
   } else if (subcommand === "remove") {
     removeVSCodeSettings();
   } else {
@@ -113,5 +126,5 @@ if (command === "wrap") {
     process.exit(1);
   }
 } else {
-  startServer(configPath);
+  startServer(configPath, portOverride !== undefined ? { port: portOverride } : undefined);
 }

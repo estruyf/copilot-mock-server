@@ -14,7 +14,9 @@
     "build": "tsc -p tsconfig.json && chmod +x dist/cli.js",
     "dev": "tsx src/server.ts",
     "start": "npm run build && node dist/cli.js",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist",
+    "prepublishOnly": "npm run clean && npm run build"
   },
   "author": "Elio Struyf <elio@struyfconsulting.be> (https://eliostruyf.com)",
   "license": "MIT",
