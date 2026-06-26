@@ -72,6 +72,8 @@ npm start -- -c ./path/to/my-config.json
 
 All fields are optional — omitted fields fall back to the defaults shown below.
 
+By default, `responsesPath` points to `./cms.mock.json`.
+
 ### `cms.config.json` reference
 
 ```json
