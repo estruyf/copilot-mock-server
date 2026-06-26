@@ -16,7 +16,7 @@ export async function proxyHttpToUpstream(
   // When the request arrives through a CONNECT tunnel the Host header carries
   // the real target host (e.g. github.com). Forward there directly instead of
   // routing everything through the Copilot API fallback URLs.
-  const rawHost = (req.headers.host ?? "").replace(/:(?:443|80)$/, "");
+  const rawHost = (req.headers.host ?? "").replace(/:\d+$/, "");
   const isLocalhost =
     !rawHost || rawHost === "localhost" || rawHost.startsWith("127.");
 

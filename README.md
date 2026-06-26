@@ -124,9 +124,9 @@ Rules are loaded from the file at `responsesPath` (or from the inline `responses
 ```json
 [
   {
-    "input": ["kubernetes", "yaml"],
-    "title": "Kubernetes YAML Template",
-    "output": "Here is a Kubernetes YAML template..."
+    "input": ["joke"],
+    "title": "Developer Joke",
+    "output": "Why did the developer go broke? Because he used up all his cache."
   },
   {
     "input": ["Let me check if this is working with Demo Time"],

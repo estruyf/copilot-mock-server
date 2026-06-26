@@ -20,6 +20,26 @@
     "node-forge": "^1.4.0",
     "ws": "^8.18.0"
   },
+  "author": "Elio Struyf <elio@struyfconsulting.be> (https://eliostruyf.com)",
+  "license": "MIT",
+  "keywords": [
+    "copilot",
+    "github-copilot",
+    "mock",
+    "proxy",
+    "mitm",
+    "websocket",
+    "sse",
+    "demo"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/estruyf/copilot-mock-server.git"
+  },
+  "bugs": {
+    "url": "https://github.com/estruyf/copilot-mock-server/issues"
+  },
+  "homepage": "https://github.com/estruyf/copilot-mock-server#readme",
   "engines": {
     "node": ">=18"
   },
