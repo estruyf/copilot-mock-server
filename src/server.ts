@@ -5,6 +5,7 @@ import WebSocket, { WebSocketServer } from "ws";
 import { certForHost, initCerts, caPath } from "./cert.js";
 import { CONFIG, initConfig } from "./config.js";
 import { log } from "./logger.js";
+import { printBanner } from "./banner.js";
 import {
   describeRequest,
   isMockablePostPath,
@@ -236,16 +237,16 @@ export function startServer(configPath: string) {
   });
 
   server.listen(CONFIG.port, () => {
-    log(`Mock Copilot backend listening on http://localhost:${CONFIG.port}`);
-    log(`WebSocket upgrades accepted on ws://localhost:${CONFIG.port}`);
-    log(`Config: ${path.resolve(configPath)}`);
     const src = CONFIG.responses
       ? "inline responses[]"
       : path.resolve(CONFIG.responsesPath);
-    log(`Responses source: ${src}`);
-    log(`CA cert: ${caPath()}`);
-    log(`  Trust it: copilot-mock-server trust-ca`);
-    log(`  Or set:   NODE_EXTRA_CA_CERTS="${caPath()}" <command>`);
-    log(`Loaded ${loadPromptRules().length} prompt rule(s)`);
+    const ruleCount = loadPromptRules().length;
+    printBanner({
+      port: CONFIG.port,
+      configPath: path.resolve(configPath),
+      responsesSrc: src,
+      caCertPath: caPath(),
+      ruleCount,
+    });
   });
 }
