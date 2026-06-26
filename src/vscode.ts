@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import readline from "node:readline";
+import { applyEdits, modify, parse } from "jsonc-parser";
 
 const MOCK_KEYS = [
   "github.copilot.advanced.debug.overrideProxyUrl",
@@ -23,24 +24,13 @@ function assertAllowedPath(filePath: string): void {
   }
 }
 
-function readJson(filePath: string): Record<string, unknown> {
+function readRaw(filePath: string): string {
   assertAllowedPath(filePath);
   try {
-    const raw = fs.readFileSync(filePath, "utf8");
-    // VS Code settings.json is JSONC — strip line and block comments before parsing.
-    const stripped = raw
-      .replace(/\/\/[^\n]*/g, "")
-      .replace(/\/\*[\s\S]*?\*\//g, "");
-    return JSON.parse(stripped) as Record<string, unknown>;
+    return fs.readFileSync(filePath, "utf8");
   } catch {
-    return {};
+    return "{}";
   }
-}
-
-function writeJson(filePath: string, data: Record<string, unknown>): void {
-  assertAllowedPath(filePath);
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  fs.writeFileSync(filePath, JSON.stringify(data, null, 2) + "\n", "utf8");
 }
 
 function confirm(question: string): Promise<boolean> {
@@ -63,14 +53,25 @@ export async function addVSCodeSettings(port: number): Promise<void> {
     }
   }
 
-  const settings = readJson(SETTINGS_PATH);
+  assertAllowedPath(SETTINGS_PATH);
+
   const baseUrl = `http://localhost:${port}`;
+  const newValues: Record<string, string> = {
+    "github.copilot.advanced.debug.overrideProxyUrl": baseUrl,
+    "github.copilot.advanced.debug.overrideCapiUrl": baseUrl,
+    "github.copilot.advanced.debug.overrideAuthType": "token",
+  };
 
-  settings["github.copilot.advanced.debug.overrideProxyUrl"] = baseUrl;
-  settings["github.copilot.advanced.debug.overrideCapiUrl"] = baseUrl;
-  settings["github.copilot.advanced.debug.overrideAuthType"] = "token";
+  let raw = fs.existsSync(SETTINGS_PATH) ? readRaw(SETTINGS_PATH) : "{}";
 
-  writeJson(SETTINGS_PATH, settings);
+  // Apply each key surgically, preserving existing content and comments.
+  for (const [key, value] of Object.entries(newValues)) {
+    const edits = modify(raw, [key], value, { formattingOptions: { insertSpaces: true, tabSize: 2 } });
+    raw = applyEdits(raw, edits);
+  }
+
+  fs.mkdirSync(path.dirname(SETTINGS_PATH), { recursive: true });
+  fs.writeFileSync(SETTINGS_PATH, raw, "utf8");
   console.log(`Updated: ${SETTINGS_PATH}`);
   console.log("\nReload your VS Code window to activate the mock server for this session.");
   console.log("Run `copilot-mock-server vscode remove` to undo.");
@@ -82,15 +83,22 @@ export function removeVSCodeSettings(): void {
     return;
   }
 
-  const settings = readJson(SETTINGS_PATH);
-  const before = Object.keys(settings).length;
+  assertAllowedPath(SETTINGS_PATH);
+
+  let raw = readRaw(SETTINGS_PATH);
+  const parsed = parse(raw) as Record<string, unknown>;
+  let removed = 0;
 
   for (const key of MOCK_KEYS) {
-    delete settings[key];
+    if (key in parsed) {
+      const edits = modify(raw, [key], undefined, { formattingOptions: { insertSpaces: true, tabSize: 2 } });
+      raw = applyEdits(raw, edits);
+      removed++;
+    }
   }
 
-  if (Object.keys(settings).length < before) {
-    writeJson(SETTINGS_PATH, settings);
+  if (removed > 0) {
+    fs.writeFileSync(SETTINGS_PATH, raw, "utf8");
     console.log(`Removed mock settings from: ${SETTINGS_PATH}`);
   } else {
     console.log(`No mock settings found in: ${SETTINGS_PATH}`);

@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.1.0] - 2026-06-26
+
+### Changed
+
+- **`vscode add` / `vscode remove`** — now uses `jsonc-parser` to make surgical edits to `.vscode/settings.json`; comments, formatting, and all unrelated settings are preserved instead of being rewritten
+
 ## [1.0.0] - 2026-06-25
 
 Initial release of `copilot-mock-server` — a local MITM proxy that intercepts GitHub Copilot Chat traffic and replays scripted responses for deterministic demo recordings.
