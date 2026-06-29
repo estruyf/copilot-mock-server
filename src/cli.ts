@@ -1,9 +1,11 @@
 #!/usr/bin/env node
 import { execSync, spawn } from "node:child_process";
 import { createRequire } from "node:module";
+import path from "node:path";
 import { startServer } from "./server.js";
 import { addVSCodeSettings, removeVSCodeSettings } from "./vscode.js";
 import { initConfig, CONFIG } from "./config.js";
+import { loadPromptRules } from "./rules.js";
 import { caPath } from "./cert.js";
 
 const require = createRequire(import.meta.url);
@@ -14,6 +16,7 @@ Usage: copilot-mock-server [command] [options]
 
 Commands:
   (none)              Start the mock server (default)
+  list                List all loaded mock rules and exit
   learn               Start in learning mode — proxy all requests and record
                       responses to cms.learn.json for use as mock rules
                       Use --raw to also print the raw SSE stream to the console
@@ -30,6 +33,7 @@ Options:
 
 Examples:
   copilot-mock-server
+  copilot-mock-server list
   copilot-mock-server learn
   copilot-mock-server wrap copilot
   copilot-mock-server --port 8080 wrap copilot
@@ -135,6 +139,72 @@ if (command === "wrap") {
     console.error("Usage: copilot-mock-server vscode <add|remove>");
     process.exit(1);
   }
+} else if (command === "list") {
+  initConfig(configPath);
+  const rules = loadPromptRules();
+
+  const R = "\x1b[0m";
+  const BOLD = "\x1b[1m";
+  const DIM = "\x1b[2m";
+  const CYAN = "\x1b[36m";
+  const YELLOW = "\x1b[33m";
+  const sep = `${DIM}${"─".repeat(56)}${R}`;
+
+  const responsesSrc = CONFIG.responses
+    ? "inline responses[]"
+    : path.resolve(CONFIG.responsesPath);
+
+  console.log("");
+  console.log(`  ${BOLD}${CYAN}copilot-mock-server${R}  ${DIM}v${version}${R}`);
+  console.log(`  ${sep}`);
+  console.log(`  ${DIM}Config    ${R}${path.resolve(configPath)}`);
+  console.log(`  ${DIM}Responses ${R}${responsesSrc}`);
+  console.log("");
+
+  if (rules.length === 0) {
+    console.log(`  ${YELLOW}No rules loaded.${R}`);
+    console.log("");
+    process.exit(0);
+  }
+
+  console.log(`  ${BOLD}${rules.length} rule${rules.length !== 1 ? "s" : ""} loaded${R}`);
+  console.log("");
+
+  const numW = String(rules.length).length;
+  for (let i = 0; i < rules.length; i++) {
+    const rule = rules[i];
+    const num = String(i + 1).padStart(numW);
+    const tokens = rule.input.map((t) => `"${t}"`).join(", ");
+
+    let outputDesc: string;
+    if (rule.sequence.length > 0) {
+      outputDesc = `${YELLOW}[sequence: ${rule.sequence.length} items]${R}`;
+    } else if (rule.steps.length > 0) {
+      outputDesc = `${DIM}(${rule.steps.length} step${rule.steps.length !== 1 ? "s" : ""})${R}`;
+    } else {
+      const preview = rule.text.replace(/\s+/g, " ").trim().slice(0, 48);
+      outputDesc = `${DIM}"${preview}${rule.text.length > 48 ? "…" : ""}"${R}`;
+    }
+
+    console.log(`  ${DIM}${num}${R}  ${BOLD}${tokens}${R}`);
+    console.log(`  ${" ".repeat(numW)}    → ${outputDesc}`);
+
+    if (rule.sequence.length > 0) {
+      for (let j = 0; j < rule.sequence.length; j++) {
+        const item = rule.sequence[j];
+        let itemDesc: string;
+        if (item.steps.length > 0) {
+          itemDesc = `(${item.steps.length} step${item.steps.length !== 1 ? "s" : ""})`;
+        } else {
+          const preview = item.text.replace(/\s+/g, " ").trim().slice(0, 44);
+          itemDesc = `"${preview}${item.text.length > 44 ? "…" : ""}"`;
+        }
+        console.log(`  ${" ".repeat(numW)}      ${DIM}[${j}] ${itemDesc}${R}`);
+      }
+    }
+  }
+
+  console.log("");
 } else if (command === "learn") {
   startServer(configPath, {
     ...(portOverride !== undefined ? { port: portOverride } : {}),

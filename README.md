@@ -44,6 +44,7 @@ copilot-mock-server [command] [options]
 
 Commands:
   (none)              Start the mock server (default)
+  list                List all loaded mock rules and exit
   learn               Start in learning mode — proxy and record real responses
   learn --raw         Learning mode + print the raw SSE stream for each response
   vscode add          Inject proxy settings into .vscode/settings.json
@@ -57,6 +58,33 @@ Options:
   --raw                 Print raw SSE output (only applies to learn command)
   -h, --help            Show help
   -v, --version         Print version number
+```
+
+## Listing Rules
+
+Run `list` to print every loaded rule and exit — useful for verifying your mock file is parsed correctly before a demo:
+
+```bash
+copilot-mock-server list
+copilot-mock-server list -c ./my-config.json
+```
+
+Output shows each rule's input tokens, output type, and (for sequences) a preview of every item:
+
+```
+  copilot-mock-server  v1.3.0
+  ────────────────────────────────────────────────────────
+  Config     ./cms.config.json
+  Responses  ./cms.mock.json
+
+  3 rules loaded
+
+  1  "kubernetes", "yaml"   → "Here is a Kubernetes YAML template..."
+  2  "joke"                 → "Why did the developer go broke?..."
+  3  "status"               → [sequence: 3 items]
+       [0] "Checking the pipeline… one moment."
+       [1] "Tests are running, 3 of 12 complete."
+       [2] "All 12 tests passed. Pipeline is green."
 ```
 
 ## Configuration
@@ -77,6 +105,8 @@ npm start -- -c ./path/to/my-config.json
 All fields are optional — omitted fields fall back to the defaults shown below.
 
 By default, `responsesPath` points to `./cms.mock.json`.
+
+The server watches the config file for changes and reloads automatically — no restart required when editing `cms.config.json`. Sequence counters (see [Response sequences](#response-sequences)) are reset on every reload.
 
 ### `cms.config.json` reference
 
@@ -217,6 +247,41 @@ Use `steps` to emit a sequence of message and tool-call output items, simulating
 The optional `outcome` field controls what the proxy returns when the client sends a follow-up summarization request after the steps complete (e.g. "Summarize the following content in a single sentence…"). If `outcome` is defined, its value is streamed back as the summary — placeholders like `{{cwd}}` are resolved at that point. If `outcome` is omitted, the summarization request is forwarded to the real upstream so the client can generate its own summary.
 
 The `steps` field overrides `output` and `toolCalls` when present. Steps are emitted as separate `response.output_item` events — each text block and each tool call is its own output item. The `delayMs` on a step pauses before that step's first frame, so the loading spinner appears immediately but content arrives after the delay.
+
+### Response sequences
+
+Use `sequence` to cycle through different outputs each time a rule is matched. On the first match the first item is returned, on the second match the second item, and so on — wrapping back to the start after the last item. This is useful for demos that show a progression of responses to the same prompt.
+
+```json
+{
+  "input": ["status"],
+  "sequence": [
+    "Checking the pipeline… one moment.",
+    "Tests are running, 3 of 12 complete.",
+    "All 12 tests passed. Pipeline is green."
+  ]
+}
+```
+
+Each item in the sequence supports the same forms as a regular rule output — a plain string, an object with `text` and optional `tags`/`toolCalls`, or an object with `steps`:
+
+```json
+{
+  "input": ["deploy"],
+  "sequence": [
+    { "text": "Starting deployment…", "delayMs": 0 },
+    {
+      "steps": [
+        { "text": "Building image.", "delayMs": 300 },
+        { "text": "Pushing to registry.", "delayMs": 500 }
+      ]
+    },
+    "Deployment complete. Version 1.4.2 is live."
+  ]
+}
+```
+
+Sequence counters are per-rule and live in memory for the duration of the server process. They reset whenever the config file is reloaded (see [Configuration](#configuration)).
 
 ### Clickable file links
 

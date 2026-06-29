@@ -1,9 +1,11 @@
+import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
 import tls from "node:tls";
 import WebSocket, { WebSocketServer } from "ws";
 import { certForHost, initCerts, caPath } from "./cert.js";
 import { CONFIG, initConfig } from "./config.js";
+import type { NormalizedRule, NormalizedSequenceItem } from "./types.js";
 import { log } from "./logger.js";
 import { printBanner } from "./banner.js";
 import {
@@ -29,12 +31,42 @@ import {
 import { proxyHttpToUpstream, proxyHttpToUpstreamTee, connectWsFallback } from "./proxy.js";
 import { recordInteraction, recordInteractionFromWsFrames, type ApiPathType } from "./learner.js";
 
+function resolveRuleOutput(
+  rule: NormalizedRule,
+  counters: Map<string, number>,
+): NormalizedSequenceItem {
+  if (rule.sequence.length === 0) {
+    return { text: rule.text, tags: rule.tags, toolCalls: rule.toolCalls, steps: rule.steps };
+  }
+  const key = rule.input.join("\x00");
+  const idx = counters.get(key) ?? 0;
+  counters.set(key, idx + 1);
+  return rule.sequence[idx % rule.sequence.length];
+}
+
 export function startServer(configPath: string, overrides?: Partial<import("./types.js").Config>) {
   initConfig(configPath);
   if (overrides) Object.assign(CONFIG, overrides);
   initCerts();
 
-  let lastMatchedRule: import("./types.js").NormalizedRule | null = null;
+  const sequenceCounters = new Map<string, number>();
+
+  const configAbsPath = path.resolve(configPath);
+  try {
+    fs.watch(configAbsPath, { persistent: false }, (event) => {
+      if (event === "change") {
+        log(`Config file changed — reloading`);
+        initConfig(configPath);
+        if (overrides) Object.assign(CONFIG, overrides);
+        sequenceCounters.clear();
+        log(`Config reloaded: ${loadPromptRules().length} rules`);
+      }
+    });
+  } catch (err) {
+    log(`Config watcher unavailable: ${(err as Error).message}`);
+  }
+
+  let lastMatchedRule: NormalizedRule | null = null;
 
   const server = http.createServer((req, res) => {
     let body = "";
@@ -150,12 +182,16 @@ export function startServer(configPath: string, overrides?: Partial<import("./ty
         return;
       }
 
-      const responseText = matched
-        ? renderOutputText(matched.text, matched.tags)
-        : CONFIG.defaultResponse;
-      const toolCalls = matched?.toolCalls ?? [];
-      const steps = matched?.steps ?? [];
+      let responseText = CONFIG.defaultResponse;
+      let toolCalls: import("./types.js").ToolCall[] = [];
+      let steps: import("./types.js").NormalizedStep[] = [];
       const delayMs = matched?.delayMs ?? 0;
+      if (matched) {
+        const resolved = resolveRuleOutput(matched, sequenceCounters);
+        responseText = renderOutputText(resolved.text, resolved.tags);
+        toolCalls = resolved.toolCalls;
+        steps = resolved.steps;
+      }
 
       const requestedModel = parseRequestModel(body) ?? undefined;
 
@@ -286,15 +322,19 @@ export function startServer(configPath: string, overrides?: Partial<import("./ty
         return;
       }
 
-      const responseText = matched
-        ? renderOutputText(matched.text, matched.tags)
-        : CONFIG.defaultResponse;
-      const wsToolCalls = matched?.toolCalls ?? [];
-      const wsSteps = matched?.steps ?? [];
+      let wsResponseText = CONFIG.defaultResponse;
+      let wsToolCalls: import("./types.js").ToolCall[] = [];
+      let wsSteps: import("./types.js").NormalizedStep[] = [];
       const wsDelayMs = matched?.delayMs ?? 0;
+      if (matched) {
+        const wsResolved = resolveRuleOutput(matched, sequenceCounters);
+        wsResponseText = renderOutputText(wsResolved.text, wsResolved.tags);
+        wsToolCalls = wsResolved.toolCalls;
+        wsSteps = wsResolved.steps;
+      }
 
       const wsModel = parseRequestModel(raw) ?? undefined;
-      await streamOverWebSocket(ws, buildFrames(responseText, wsModel, wsToolCalls, wsSteps, wsDelayMs));
+      await streamOverWebSocket(ws, buildFrames(wsResponseText, wsModel, wsToolCalls, wsSteps, wsDelayMs));
     });
 
     ws.on("close", () => {

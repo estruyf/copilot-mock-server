@@ -23,6 +23,13 @@ export interface NormalizedStep {
   delayMs: number;
 }
 
+export interface NormalizedSequenceItem {
+  text: string;
+  tags: OutputTag[];
+  toolCalls: ToolCall[];
+  steps: NormalizedStep[];
+}
+
 export interface PromptRule {
   input: string[];
   title?: string;
@@ -31,6 +38,7 @@ export interface PromptRule {
   toolCalls?: ToolCall[];
   steps?: OutputStep[];
   delayMs?: number;
+  sequence?: Array<string | { text?: string; tags?: OutputTag[]; toolCalls?: ToolCall[]; steps?: OutputStep[] }>;
 }
 
 export interface NormalizedRule {
@@ -42,6 +50,7 @@ export interface NormalizedRule {
   toolCalls: ToolCall[];
   steps: NormalizedStep[];
   delayMs: number;
+  sequence: NormalizedSequenceItem[];
 }
 
 export interface ResponseContent {

@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.3.0] - 2026-06-29
+
+### Added
+
+- **Response sequences** — add a `sequence` array to any rule to cycle through different outputs on consecutive matches; the first match returns item `[0]`, the second returns item `[1]`, and so on, wrapping back to the start after the last item; each item supports the same forms as `output` (plain string, `text`/`tags`/`toolCalls` object, or `steps` array)
+- **Config hot-reload** — the server now watches the config file with `fs.watch` and reloads automatically when it changes; no restart required; sequence counters are cleared on every reload so sequences start fresh
+- **`list` command** — prints every loaded rule with its input tokens, output type, and (for sequences) a preview of each item, then exits; accepts `-c` to target a custom config file
+
 ## [1.2.0] - 2026-06-26
 
 ### Added
